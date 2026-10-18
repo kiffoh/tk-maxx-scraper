@@ -151,11 +151,28 @@ def esc(s):
     return html.escape(str(s))
 
 
+LETTER_SIZES = ["XXXS", "XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL"]
+
+
+def size_key(size):
+    """XS..XXXL in order, then numbers (shoes, waists), then everything else alphabetically."""
+    if size in LETTER_SIZES:
+        return (0, LETTER_SIZES.index(size), "")
+    num = re.match(r"\D*(\d+(?:\.\d+)?)", size)
+    return (1, float(num.group(1)), size) if num else (2, 0, size)
+
+
 def card(p):
-    sizes = "".join(f'<span class="size">{esc(s)}</span>' for s in json.loads(p["sizes"] or "[]"))
-    return (f'<a class="card" href="{esc(p["url"])}"><img src="{esc(p["image_url"])}" alt="{esc(p["name"])}" loading="lazy">'
+    sizes = json.loads(p["sizes"] or "[]")
+    chips = "".join(f'<span class="size">{esc(s)}</span>' for s in sizes)
+    return (f'<a class="card" href="{esc(p["url"])}" data-brand="{esc(p["brand"])}" data-sizes="{esc("|".join(sizes))}">'
+            f'<img src="{esc(p["image_url"])}" alt="{esc(p["name"])}" loading="lazy">'
             f'<div class="brand">{esc(p["brand"])}</div><div class="name">{esc(p["name"])}</div>'
-            f'<div class="price">{esc(p["price"])}</div><div class="sizes">{sizes}</div></a>')
+            f'<div class="price">{esc(p["price"])}</div><div class="sizes">{chips}</div></a>')
+
+
+def section(title, items):
+    return f'<section><h2>{title} (<span class="count">{len(items)}</span>)</h2><div class="grid">{"".join(map(card, items))}</div></section>'
 
 
 def render_site(products, favourites, today):
@@ -164,17 +181,20 @@ def render_site(products, favourites, today):
     for p in products:
         by_brand.setdefault(p["brand"], []).append(p)
     order = sorted(by_brand, key=lambda b: (norm(b) not in favourites, b.casefold()))
-    sections = [f'<h2>New today ({len(new)})</h2><div class="grid">{"".join(map(card, new))}</div>'] if new else []
-    sections += [f'<h2 id="{esc(norm(b))}">{"★ " if norm(b) in favourites else ""}{esc(b)} ({len(by_brand[b])})</h2>'
-                 f'<div class="grid">{"".join(map(card, by_brand[b]))}</div>' for b in order]
-    nav = " · ".join(f'<a href="#{esc(norm(b))}">{esc(b)}</a>' for b in order)
+    sections = [section("New today", new)] if new else []
+    sections += [section(("★ " if norm(b) in favourites else "") + esc(b), by_brand[b]) for b in order]
+    sizes = sorted({s for p in products for s in json.loads(p["sizes"] or "[]")}, key=size_key)
+    brand_opts = "".join(f'<option>{esc(b)}</option>' for b in order)
+    size_opts = "".join(f'<option>{esc(s)}</option>' for s in sizes)
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>TK Maxx × END. brands</title>
 <style>
 :root{{--bg:#fff;--fg:#111;--muted:#666;--line:#e5e5e5;--chip:#f2f2f2}}
 @media (prefers-color-scheme:dark){{:root{{--bg:#111;--fg:#eee;--muted:#999;--line:#333;--chip:#222}}}}
 body{{margin:0;padding:16px;font:15px/1.4 system-ui,sans-serif;background:var(--bg);color:var(--fg)}}
-nav{{color:var(--muted);font-size:13px}} nav a{{color:inherit}}
+[hidden]{{display:none!important}}
+.filters{{position:sticky;top:0;z-index:1;display:flex;flex-wrap:wrap;gap:12px;padding:8px 0;background:var(--bg);border-bottom:1px solid var(--line)}}
+.filters label{{font-size:13px;color:var(--muted)}} select{{font:inherit;margin-left:4px}}
 .grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:16px}}
 .card{{color:inherit;text-decoration:none;border:1px solid var(--line);border-radius:8px;padding:8px}}
 .card img{{width:100%;aspect-ratio:1;object-fit:cover;border-radius:4px;background:var(--chip)}}
@@ -182,7 +202,27 @@ nav{{color:var(--muted);font-size:13px}} nav a{{color:inherit}}
 .size{{display:inline-block;font-size:11px;background:var(--chip);border-radius:4px;padding:1px 5px;margin:4px 4px 0 0}}
 </style></head><body><h1>TK Maxx × END. brands</h1>
 <p>{len(products)} products in stock across {len(by_brand)} brands · updated {esc(today)}</p>
-<nav>{nav}</nav>{"".join(sections)}</body></html>"""
+<div class="filters">
+<label>Brand<select id="brand"><option value="">All brands</option>{brand_opts}</select></label>
+<label>Size<select id="size"><option value="">All sizes</option>{size_opts}</select></label>
+<span id="shown"></span></div>
+{"".join(sections)}
+<p id="none" hidden>Nothing matches those filters.</p>
+<script>
+const brand = document.getElementById("brand"), size = document.getElementById("size");
+function filter() {{
+  for (const c of document.querySelectorAll(".card"))
+    c.hidden = (brand.value && c.dataset.brand !== brand.value) || (size.value && !c.dataset.sizes.split("|").includes(size.value));
+  let any = false;
+  for (const s of document.querySelectorAll("section")) {{
+    const n = s.querySelectorAll(".card:not([hidden])").length;
+    s.hidden = !n; any ||= n > 0;
+    s.querySelector(".count").textContent = n;
+  }}
+  document.getElementById("none").hidden = any;
+}}
+brand.onchange = size.onchange = filter;
+</script></body></html>"""
 
 
 def render_email(items, brands, favourites, site_url):

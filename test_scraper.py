@@ -32,7 +32,9 @@ def test_db_flow():
 def test_render():
     p = {**row("9", "Nike", ["XL"]), "first_seen": "2026-10-19", "name": "<b>Tee</b>"}
     page = s.render_site([p], {"nike"}, "2026-10-19")
-    assert "New today (1)" in page and "★ Nike" in page and "XL" in page and "&lt;b&gt;Tee" in page
+    assert 'New today (<span class="count">1</span>)' in page and "★ Nike" in page and "&lt;b&gt;Tee" in page
+    assert 'data-brand="Nike" data-sizes="XL"' in page and "<option>XL</option>" in page
+    assert sorted(["10", "XL", "W32 R", "S", "7.5", "One"], key=s.size_key) == ["S", "XL", "7.5", "10", "W32 R", "One"]
     subject, body = s.render_email([p], ["Nike"], {"nike"}, "https://site")
     assert "1 new" in subject and "favourites:</b> 1" in body and 'href="https://site"' in body
 
